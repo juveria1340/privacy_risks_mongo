@@ -1,0 +1,23 @@
+# TLS Certificates - NEVER commit private keys
+kubernetes/mongodb/certs/
+*.key
+*.pem
+*.csr
+*.srl
+*.crt
+
+# Capture files
+*.pcap
+data/
+
+# Kubernetes config
+config
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-browse
+  namespace: dissertation
+  labels:
+    app: product-browse
+    workload: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-browse
+  template:
+    metadata:
+      labels:
+        app: product-browse
+        workload: ecommerce
+    spec:
+      nodeSelector:
+        role: app-node
+      initContainers:
+      - name: install-deps
+        image: python:3.11-slim
+        command: ["pip", "install", "flask", "pymongo", "--target=/deps"]
+        volumeMounts:
+        - name: deps
+          mountPath: /deps
+      containers:
+      - name: product-browse
+        image: python:3.11-slim
+        command: ["python3", "/app/product_browse.py"]
+        env:
+        - name: PYTHONPATH
+          value: "/deps"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: app-script
+          mountPath: /app
+        - name: tls
+          mountPath: /etc/tls
+          readOnly: true
+        - name: deps
+          mountPath: /deps
+      volumes:
+      - name: app-script
+        configMap:
+          name: product-browse-script
+      - name: tls
+        secret:
+          secretName: mongodb-tls
+      - name: deps
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-browse
+  namespace: dissertation
+spec:
+  selector:
+    app: product-browse
+  ports:
+  - port: 5000
+    targetPort: 5000
+    name: http
+  type: ClusterIP

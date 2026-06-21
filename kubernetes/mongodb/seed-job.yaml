@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongodb-seed
+  namespace: dissertation
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: seed
+        image: python:3.11-slim
+        command:
+        - bash
+        - -c
+        - |
+          pip install pymongo --quiet
+          python3 /scripts/seed_mongodb.py
+        volumeMounts:
+        - name: seed-script
+          mountPath: /scripts
+        - name: tls
+          mountPath: /etc/tls
+          readOnly: true
+      volumes:
+      - name: seed-script
+        configMap:
+          name: seed-script
+      - name: tls
+        secret:
+          secretName: mongodb-tls

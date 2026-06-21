@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  namespace: dissertation
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+        tier: database
+    spec:
+      nodeSelector:
+        role: mongo-node
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+      - name: mongodb
+        image: mongo:6.0
+        command:
+        - mongod
+        - --tlsMode=requireTLS
+        - --tlsCertificateKeyFile=/etc/tls/mongo.pem
+        - --tlsCAFile=/etc/tls/ca.crt
+        - --bind_ip_all
+        ports:
+        - containerPort: 27017
+          name: mongo
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 250m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+        - name: tls
+          mountPath: /etc/tls
+          readOnly: true
+      volumes:
+      - name: data
+        emptyDir: {}
+      - name: tls
+        secret:
+          secretName: mongodb-tls

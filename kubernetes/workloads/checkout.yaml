@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: dissertation
+  labels:
+    app: checkout
+    workload: ecommerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: checkout
+  template:
+    metadata:
+      labels:
+        app: checkout
+        workload: ecommerce
+    spec:
+      nodeSelector:
+        role: app-node
+      initContainers:
+      - name: install-deps
+        image: python:3.11-slim
+        command: ["pip", "install", "flask", "pymongo", "--target=/deps"]
+        volumeMounts:
+        - name: deps
+          mountPath: /deps
+      containers:
+      - name: checkout
+        image: python:3.11-slim
+        command: ["python3", "/app/checkout.py"]
+        env:
+        - name: PYTHONPATH
+          value: "/deps"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: app-script
+          mountPath: /app
+        - name: tls
+          mountPath: /etc/tls
+          readOnly: true
+        - name: deps
+          mountPath: /deps
+      volumes:
+      - name: app-script
+        configMap:
+          name: checkout-script
+      - name: tls
+        secret:
+          secretName: mongodb-tls
+      - name: deps
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+  namespace: dissertation
+spec:
+  selector:
+    app: checkout
+  ports:
+  - port: 5000
+    targetPort: 5000
+    name: http
+  type: ClusterIP

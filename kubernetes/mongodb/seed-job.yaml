@@ -14,13 +14,16 @@ spec:
         - bash
         - -c
         - |
-          pip install pymongo --quiet
+          pip install pymongo pandas --quiet
           python3 /scripts/seed_mongodb.py
         volumeMounts:
         - name: seed-script
           mountPath: /scripts
         - name: tls
           mountPath: /etc/tls
+          readOnly: true
+        - name: seed-data
+          mountPath: /data
           readOnly: true
       volumes:
       - name: seed-script
@@ -29,3 +32,6 @@ spec:
       - name: tls
         secret:
           secretName: mongodb-tls
+      - name: seed-data
+        configMap:
+          name: seed-data

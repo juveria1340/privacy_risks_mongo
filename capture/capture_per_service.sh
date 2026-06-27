@@ -69,6 +69,3 @@ echo "=============================================="
 echo " All captures complete!"
 echo "=============================================="
 ls -lh $CAPTURE_DIR
-echo ""
-echo " Next: copy pcap files to your laptop"
-echo " Run: bash capture/copy_captures.sh"

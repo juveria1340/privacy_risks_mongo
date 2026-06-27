@@ -35,6 +35,4 @@ echo "=============================================="
 echo " Capture complete!"
 ls -lh $CAPTURE_DIR
 echo "=============================================="
-echo ""
-echo " Copy files to your laptop:"
-echo "   scp Juveria@node-3.cloudlab.us:/tmp/captures/*.pcap ./"
+

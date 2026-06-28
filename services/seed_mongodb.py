@@ -1,9 +1,25 @@
 import pymongo
+import pandas as pd
 import random
 import time
+import re
 from datetime import datetime, timedelta
 
-# Wait for MongoDB to be ready
+def parse_price(price_str):
+    if pd.isna(price_str):
+        return 0.0
+    cleaned = re.sub(r"[^\d.]", "", str(price_str))
+    try:
+        return float(cleaned)
+    except:
+        return 0.0
+
+def parse_rating(rating_str):
+    try:
+        return float(str(rating_str).replace(",", ".").strip())
+    except:
+        return 0.0
+
 print("Waiting for MongoDB to be ready...")
 client = None
 for i in range(30):
@@ -12,6 +28,7 @@ for i in range(30):
             "mongodb://mongodb.dissertation.svc.cluster.local:27017",
             tls=True,
             tlsCAFile="/etc/tls/ca.crt",
+            tlsCertificateKeyFile="/etc/tls/mongo.pem",
             tlsAllowInvalidHostnames=True,
             serverSelectionTimeoutMS=5000
         )
@@ -19,64 +36,94 @@ for i in range(30):
         print("MongoDB is ready!")
         break
     except Exception as e:
-        print(f"Attempt {i+1}/30 - MongoDB not ready yet: {e}")
+        print(f"Attempt {i+1}/30 - MongoDB not ready: {e}")
         time.sleep(5)
 
 if client is None:
-    print("Could not connect to MongoDB after 30 attempts")
+    print("Could not connect to MongoDB")
     exit(1)
 
 db = client.ecommerce
 
-# Clear existing data
+# Clear existing collections
 db.products.drop()
 db.users.drop()
 db.carts.drop()
 db.orders.drop()
 print("Cleared existing collections")
 
-# Seed Products
-categories = ["electronics", "clothing", "books", "home", "sports"]
-brands = ["BrandA", "BrandB", "BrandC", "BrandD", "BrandE"]
-tags_pool = ["sale", "new", "popular", "trending", "limited"]
+# Load Amazon Sales Dataset
+print("Loading Amazon Sales Dataset...")
+try:
+    df = pd.read_csv("/data/amazon.csv", encoding="utf-8")
+except:
+    df = pd.read_csv("/data/amazon.csv", encoding="latin-1")
 
+print(f"Loaded {len(df)} rows from amazon.csv")
+print(f"Columns: {list(df.columns)}")
+
+# Seed Products from real Amazon data
 products = []
-for i in range(200):
-    products.append({
-        "productId": f"prod_{i}",
-        "name": f"Product {i}",
-        "brand": random.choice(brands),
-        "category": random.choice(categories),
-        "price": round(random.uniform(5.0, 500.0), 2),
-        "tags": random.sample(tags_pool, k=random.randint(1, 3)),
-        "stock": random.randint(0, 100),
-        "rating": round(random.uniform(1.0, 5.0), 1)
-    })
-db.products.insert_many(products)
-print(f"Inserted {len(products)} products")
+for _, row in df.iterrows():
+    try:
+        products.append({
+            "productId": str(row.get("product_id", f"prod_{_}")),
+            "name": str(row.get("product_name", "")),
+            "category": str(row.get("category", "general")),
+            "price": parse_price(row.get("discounted_price", 0)),
+            "originalPrice": parse_price(row.get("actual_price", 0)),
+            "discount": str(row.get("discount_percentage", "0%")),
+            "rating": parse_rating(row.get("rating", 0)),
+            "ratingCount": str(row.get("rating_count", "0")),
+            "description": str(row.get("about_product", "")),
+            "reviewTitle": str(row.get("review_title", "")),
+            "reviewContent": str(row.get("review_content", ""))
+        })
+    except Exception as e:
+        print(f"Skipping row {_}: {e}")
+        continue
 
-# Seed Users
+db.products.insert_many(products)
+print(f"Inserted {len(products)} real Amazon products")
+
+# Extract unique categories from real data
+categories = df["category"].dropna().unique().tolist()
+print(f"Found {len(categories)} unique categories")
+
+# Extract real product IDs
+product_ids = [p["productId"] for p in products]
+
+# Synthetic Users
+print("Generating synthetic users...")
 users = []
-for i in range(100):
+locations = ["UK", "US", "DE", "IN", "AU", "FR", "CA", "JP"]
+for i in range(500):
     users.append({
         "userId": f"user_{i}",
-        "name": f"User {i}",
-        "email": f"user{i}@example.com",
+        "name": f"Customer {i}",
+        "email": f"customer{i}@example.com",
         "profile": {
             "age": random.randint(18, 65),
-            "location": random.choice(["UK", "US", "DE", "FR", "AU"]),
-            "preferences": random.sample(categories, k=2)
+            "location": random.choice(locations),
+            "preferences": random.sample(
+                categories[:20] if len(categories) > 20 else categories,
+                k=min(2, len(categories))
+            )
         }
     })
 db.users.insert_many(users)
 print(f"Inserted {len(users)} users")
 
-# Seed Carts
+# Synthetic Carts using real product IDs
+print("Generating synthetic carts...")
 carts = []
-for i in range(80):
-    cart_products = random.sample([f"prod_{j}" for j in range(200)], k=random.randint(1, 5))
+for i in range(300):
+    cart_products = random.sample(
+        product_ids,
+        k=random.randint(1, min(5, len(product_ids)))
+    )
     carts.append({
-        "userId": f"user_{i}",
+        "userId": f"user_{random.randint(0, 499)}",
         "products": [
             {"productId": pid, "quantity": random.randint(1, 3)}
             for pid in cart_products
@@ -86,28 +133,36 @@ for i in range(80):
 db.carts.insert_many(carts)
 print(f"Inserted {len(carts)} carts")
 
-# Seed Orders
+# Synthetic Orders using real product IDs
+print("Generating synthetic orders...")
 orders = []
-for i in range(150):
-    order_products = random.sample([f"prod_{j}" for j in range(200)], k=random.randint(1, 4))
+statuses = ["pending", "shipped", "delivered", "cancelled"]
+for i in range(1000):
+    order_products = random.sample(
+        product_ids,
+        k=random.randint(1, min(4, len(product_ids)))
+    )
     orders.append({
         "orderId": f"order_{i}",
-        "userId": f"user_{random.randint(0, 99)}",
+        "userId": f"user_{random.randint(0, 499)}",
         "products": [
-            {"productId": pid, "quantity": random.randint(1, 2),
-             "price": round(random.uniform(5.0, 500.0), 2)}
+            {
+                "productId": pid,
+                "quantity": random.randint(1, 2)
+            }
             for pid in order_products
         ],
-        "totalAmount": round(random.uniform(10.0, 1000.0), 2),
-        "status": random.choice(["pending", "shipped", "delivered"]),
-        "createdAt": datetime.now() - timedelta(days=random.randint(1, 30))
+        "status": random.choice(statuses),
+        "createdAt": datetime.now() - timedelta(days=random.randint(1, 365))
     })
 db.orders.insert_many(orders)
 print(f"Inserted {len(orders)} orders")
 
 # Create Indexes
+print("Creating indexes...")
 db.products.create_index("category")
-db.products.create_index("tags")
+db.products.create_index("rating")
+db.products.create_index("productId")
 db.users.create_index("userId")
 db.carts.create_index("userId")
 db.orders.create_index("userId")
@@ -115,8 +170,8 @@ db.orders.create_index("createdAt")
 print("Indexes created")
 
 print("\n=== Seed Complete ===")
-print(f"Products:  {db.products.count_documents({})}")
-print(f"Users:     {db.users.count_documents({})}")
-print(f"Carts:     {db.carts.count_documents({})}")
-print(f"Orders:    {db.orders.count_documents({})}")
+print(f"Products : {db.products.count_documents({})}")
+print(f"Users    : {db.users.count_documents({})}")
+print(f"Carts    : {db.carts.count_documents({})}")
+print(f"Orders   : {db.orders.count_documents({})}")
 client.close()

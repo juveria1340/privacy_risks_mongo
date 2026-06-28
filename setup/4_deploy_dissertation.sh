@@ -67,6 +67,15 @@ kubectl create configmap seed-data \
   --dry-run=client -o yaml | kubectl apply -f -
 echo "    Done."
 
+# 5a. Create seed data ConfigMap from CSV
+echo ""
+echo "--> [5a/8] Creating seed data ConfigMap from CSV..."
+kubectl create configmap seed-data \
+  --from-file=amazon.csv=$REPO_DIR/data/seed/amazon.csv \
+  --namespace $NAMESPACE \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo "    Done."
+
 # 5. Seed MongoDB
 echo ""
 echo "--> [5/8] Seeding MongoDB with e-commerce data..."
@@ -115,6 +124,7 @@ echo "=============================================="
 echo ""
 echo " Next: SSH into node-3 then run:"
 echo "   bash capture/capture_traffic.sh"
+
 
 
 

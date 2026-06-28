@@ -1,25 +1,15 @@
 #!/bin/bash
-# =============================================================
 # capture_per_service.sh
-# =============================================================
-# PURPOSE : Capture traffic per service with timing logs
-# RUN ON  : node-1 (mongo-node)
-# USAGE   : bash capture/capture_per_service.sh
-# MANUAL  : Press Enter to start/stop each service capture
-# =============================================================
+# RUN ON: node-1
 
 CAPTURE_DIR="/tmp/captures"
 mkdir -p $CAPTURE_DIR
-
 INTERFACE="cni0"
 LOG_FILE="/tmp/capture_log.txt"
 
-# Initialize log
 echo "================================================" > $LOG_FILE
 echo " Traffic Capture Log" >> $LOG_FILE
 echo " Date: $(date)" >> $LOG_FILE
-echo " Interface: $INTERFACE" >> $LOG_FILE
-echo " Node: $(hostname)" >> $LOG_FILE
 echo "================================================" >> $LOG_FILE
 echo "" >> $LOG_FILE
 
@@ -48,8 +38,8 @@ for service in "${SERVICES[@]}"; do
   echo " Next service: $service"
   echo "----------------------------------------------"
   echo " Go to node-0 and start traffic for: $service"
-  echo " Press Enter HERE to START tcpdump..."
-  read
+  printf " Press Enter HERE to START tcpdump... "
+  read REPLY </dev/tty
 
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   OUTFILE="$CAPTURE_DIR/${service}_${TIMESTAMP}.pcap"
@@ -59,18 +49,20 @@ for service in "${SERVICES[@]}"; do
   echo " [$START_HUMAN] tcpdump STARTED for $service"
   echo " File: $OUTFILE"
 
+  # Redirect ALL tcpdump output to /dev/null
   sudo tcpdump -i $INTERFACE \
     port 27017 \
     -w $OUTFILE \
-    -q &
+    -q 2>/dev/null 1>/dev/null &
   TCPDUMP_PID=$!
 
   echo " tcpdump PID: $TCPDUMP_PID"
-  echo " Press Enter to STOP when traffic is complete..."
-  read
+  printf " Press Enter to STOP when traffic is complete... "
+  read REPLY </dev/tty
 
-  kill $TCPDUMP_PID 2>/dev/null
+  sudo kill $TCPDUMP_PID 2>/dev/null
   wait $TCPDUMP_PID 2>/dev/null || true
+  sleep 1
 
   END_TIME=$(date +%s)
   END_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
@@ -84,7 +76,6 @@ for service in "${SERVICES[@]}"; do
   echo " File size: $SIZE"
   echo " Packets  : $PACKETS"
 
-  # Write to log
   echo "Service: $service" >> $LOG_FILE
   echo "  Start    : $START_HUMAN" >> $LOG_FILE
   echo "  End      : $END_HUMAN" >> $LOG_FILE
@@ -102,22 +93,15 @@ TOTAL_END=$(date +%s)
 TOTAL_DURATION=$(( TOTAL_END - TOTAL_START ))
 
 echo "" >> $LOG_FILE
-echo "================================================" >> $LOG_FILE
-echo " Summary" >> $LOG_FILE
-echo " Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
-echo " Completed: $(date)" >> $LOG_FILE
-echo "================================================" >> $LOG_FILE
+echo "Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
+echo "Completed: $(date)" >> $LOG_FILE
 
 echo ""
 echo "=============================================="
-echo " All captures complete!"
-echo " Total time: ${TOTAL_DURATION}s"
+echo " All captures complete! Total time: ${TOTAL_DURATION}s"
 echo "=============================================="
-echo ""
 ls -lh $CAPTURE_DIR
 echo ""
-echo " Full capture log:"
-echo "-------------------"
 cat $LOG_FILE
 echo ""
 echo " Run: bash capture/copy_captures.sh"

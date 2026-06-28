@@ -14,7 +14,7 @@ spec:
         - bash
         - -c
         - |
-          pip install pymongo pandas --quiet
+          pip install pymongo --quiet
           python3 /scripts/seed_mongodb.py
         volumeMounts:
         - name: seed-script

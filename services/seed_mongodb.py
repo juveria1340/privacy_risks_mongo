@@ -1,12 +1,12 @@
 import pymongo
-import pandas as pd
+import csv
 import random
 import time
 import re
 from datetime import datetime, timedelta
 
 def parse_price(price_str):
-    if pd.isna(price_str):
+    if not price_str or price_str == "nan":
         return 0.0
     cleaned = re.sub(r"[^\d.]", "", str(price_str))
     try:
@@ -52,49 +52,45 @@ db.carts.drop()
 db.orders.drop()
 print("Cleared existing collections")
 
-# Load Amazon Sales Dataset
+# Load Amazon CSV using built-in csv module (no pandas needed)
 print("Loading Amazon Sales Dataset...")
-try:
-    df = pd.read_csv("/tmp/amazon.csv", encoding="utf-8")
-except:
-    df = pd.read_csv("/tmp/amazon.csv", encoding="latin-1")
-
-print(f"Loaded {len(df)} rows from amazon.csv")
-print(f"Columns: {list(df.columns)}")
-
-# Seed Products from real Amazon data
 products = []
-for _, row in df.iterrows():
-    try:
-        products.append({
-            "productId": str(row.get("product_id", f"prod_{_}")),
-            "name": str(row.get("product_name", "")),
-            "category": str(row.get("category", "general")),
-            "price": parse_price(row.get("discounted_price", 0)),
-            "originalPrice": parse_price(row.get("actual_price", 0)),
-            "discount": str(row.get("discount_percentage", "0%")),
-            "rating": parse_rating(row.get("rating", 0)),
-            "ratingCount": str(row.get("rating_count", "0")),
-            "description": str(row.get("about_product", "")),
-            "reviewTitle": str(row.get("review_title", "")),
-            "reviewContent": str(row.get("review_content", ""))
-        })
-    except Exception as e:
-        print(f"Skipping row {_}: {e}")
-        continue
+categories = set()
+
+with open("/data/amazon.csv", encoding="utf-8") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        try:
+            category = str(row.get("category", "general"))
+            categories.add(category)
+            products.append({
+                "productId": str(row.get("product_id", "")),
+                "name": str(row.get("product_name", "")),
+                "category": category,
+                "price": parse_price(row.get("discounted_price", "0")),
+                "originalPrice": parse_price(row.get("actual_price", "0")),
+                "discount": str(row.get("discount_percentage", "0%")),
+                "rating": parse_rating(row.get("rating", "0")),
+                "ratingCount": str(row.get("rating_count", "0")),
+                "description": str(row.get("about_product", "")),
+                "reviewTitle": str(row.get("review_title", "")),
+                "reviewContent": str(row.get("review_content", ""))
+            })
+        except Exception as e:
+            print(f"Skipping row: {e}")
+            continue
 
 db.products.insert_many(products)
 print(f"Inserted {len(products)} real Amazon products")
 
-# Extract unique categories from real data
-categories = df["category"].dropna().unique().tolist()
+categories = list(categories)
 print(f"Found {len(categories)} unique categories")
 
-# Extract real product IDs
+# Product IDs for cart and order generation
 product_ids = [p["productId"] for p in products]
 
 # Synthetic Users
-print("Generating synthetic users...")
+print("Generating users...")
 users = []
 locations = ["UK", "US", "DE", "IN", "AU", "FR", "CA", "JP"]
 for i in range(500):
@@ -114,8 +110,8 @@ for i in range(500):
 db.users.insert_many(users)
 print(f"Inserted {len(users)} users")
 
-# Synthetic Carts using real product IDs
-print("Generating synthetic carts...")
+# Synthetic Carts
+print("Generating carts...")
 carts = []
 for i in range(300):
     cart_products = random.sample(
@@ -133,8 +129,8 @@ for i in range(300):
 db.carts.insert_many(carts)
 print(f"Inserted {len(carts)} carts")
 
-# Synthetic Orders using real product IDs
-print("Generating synthetic orders...")
+# Synthetic Orders
+print("Generating orders...")
 orders = []
 statuses = ["pending", "shipped", "delivered", "cancelled"]
 for i in range(1000):
@@ -146,10 +142,7 @@ for i in range(1000):
         "orderId": f"order_{i}",
         "userId": f"user_{random.randint(0, 499)}",
         "products": [
-            {
-                "productId": pid,
-                "quantity": random.randint(1, 2)
-            }
+            {"productId": pid, "quantity": random.randint(1, 2)}
             for pid in order_products
         ],
         "status": random.choice(statuses),
@@ -175,4 +168,3 @@ print(f"Users    : {db.users.count_documents({})}")
 print(f"Carts    : {db.carts.count_documents({})}")
 print(f"Orders   : {db.orders.count_documents({})}")
 client.close()
-

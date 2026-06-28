@@ -14,15 +14,38 @@ def get_client():
         serverSelectionTimeoutMS=5000
     )
 
+# Real Amazon top-level categories
+CATEGORIES = [
+    "Computers&Accessories",
+    "Electronics",
+    "Home&Kitchen",
+    "Car&Motorbike",
+    "Health&PersonalCare",
+    "OfficeProducts",
+    "Toys&Games",
+    "MusicalInstruments"
+]
+
 @app.route('/api/v1', methods=['GET'])
 def product_browse():
     client = get_client()
     db = client.ecommerce
-    category = random.choice(["electronics","clothing","books","home","sports"])
-    results = list(db.products.find({"category": category}).limit(10))
-    product = db.products.find_one({"productId": f"prod_{random.randint(0,199)}"})
+    category = random.choice(CATEGORIES)
+    # Use regex to match category prefix
+    import re
+    results = list(db.products.find(
+        {"category": {"$regex": f"^{re.escape(category)}", "$options": "i"}}
+    ).limit(10))
+    product = db.products.find_one(
+        {"category": {"$regex": f"^{re.escape(category)}", "$options": "i"}}
+    )
     client.close()
-    return jsonify({"status": "ok", "operation": "product_browse", "count": len(results)}), 200
+    return jsonify({
+        "status": "ok",
+        "operation": "product_browse",
+        "category": category,
+        "count": len(results)
+    }), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

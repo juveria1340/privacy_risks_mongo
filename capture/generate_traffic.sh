@@ -6,9 +6,7 @@
 # RUN ON  : node-0
 # USAGE   : bash capture/generate_traffic.sh <requests> <rate>
 # EXAMPLE : bash capture/generate_traffic.sh 500 10
-# NOTE    : Run capture/capture_per_service.sh on node-1 first!
-# SIGNAL  : Uses /tmp/traffic_signal.txt to coordinate
-#           with capture_per_service.sh (no Enter needed)
+# MANUAL  : Coordinate Enter key presses with node-1
 # =============================================================
 
 set -e
@@ -17,16 +15,16 @@ REQUESTS=${1:-500}
 RATE=${2:-10}
 NAMESPACE="dissertation"
 SLEEP_INTERVAL=$(echo "scale=3; 1/$RATE" | bc)
-SIGNAL_FILE="/tmp/traffic_signal.txt"
-LOG_FILE="/tmp/traffic_generation.log"
+LOG_FILE="/tmp/traffic_log.txt"
 
 # Initialize log
-echo "Traffic Generation Log" > $LOG_FILE
-echo "======================" >> $LOG_FILE
-echo "Date: $(date)" >> $LOG_FILE
-echo "Requests per service: $REQUESTS" >> $LOG_FILE
-echo "Rate: $RATE req/sec" >> $LOG_FILE
-echo "Sleep interval: ${SLEEP_INTERVAL}s" >> $LOG_FILE
+echo "================================================" > $LOG_FILE
+echo " Traffic Generation Log" >> $LOG_FILE
+echo " Date: $(date)" >> $LOG_FILE
+echo " Requests per service: $REQUESTS" >> $LOG_FILE
+echo " Target rate: $RATE req/sec" >> $LOG_FILE
+echo " Node: $(hostname)" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
 echo "" >> $LOG_FILE
 
 echo "=============================================="
@@ -35,7 +33,6 @@ echo " Requests per service : $REQUESTS"
 echo " Rate                 : $RATE req/sec"
 echo " Sleep interval       : ${SLEEP_INTERVAL}s"
 echo " Total requests       : $((REQUESTS * 6))"
-echo " Est. time per service: $((REQUESTS / RATE)) seconds"
 echo " Log file             : $LOG_FILE"
 echo "=============================================="
 
@@ -69,28 +66,25 @@ trigger_service() {
   echo ""
   echo "----------------------------------------------"
   echo " Service  : $service"
+  echo " Pod      : $pod"
   echo " Requests : $count at $RATE req/sec"
-  echo " Start    : $(date '+%Y-%m-%d %H:%M:%S')"
   echo "----------------------------------------------"
-
-  # Signal capture script to start
-  echo "START:$service" > $SIGNAL_FILE
-  echo " Signal sent: START:$service"
-  echo " Waiting 2 seconds for tcpdump to start..."
-  sleep 2
+  echo " Go to node-1 and press Enter to START tcpdump"
+  echo " Then press Enter HERE to begin traffic..."
+  read
 
   local start_time=$(date +%s)
   local start_human=$(date '+%Y-%m-%d %H:%M:%S')
+  echo " [$start_human] Starting $service traffic..."
 
-  # Run loop INSIDE pod
+  # Run loop INSIDE pod - much faster than kubectl exec per request
   kubectl exec -n $NAMESPACE $pod -- python3 -c "
 import urllib.request
 import time
 
 total = $count
 interval = $interval
-
-print(f'Starting {total} requests at {1/interval:.1f} req/sec')
+print(f'Sending {total} requests at {1/interval:.1f} req/sec')
 start = time.time()
 
 for i in range(1, total + 1):
@@ -102,31 +96,36 @@ for i in range(1, total + 1):
     if i % 100 == 0:
         elapsed = time.time() - start
         rate = i / elapsed
-        print(f'Progress: {i}/{total} | Rate: {rate:.1f} req/sec')
+        print(f'Progress: {i}/{total} | Elapsed: {elapsed:.0f}s | Rate: {rate:.1f} req/sec')
 
 elapsed = time.time() - start
 print(f'Done! {total} requests in {elapsed:.1f}s ({total/elapsed:.1f} req/sec)')
 "
 
   local end_time=$(date +%s)
-  local duration=$(( end_time - start_time ))
   local end_human=$(date '+%Y-%m-%d %H:%M:%S')
+  local duration=$(( end_time - start_time ))
+  local actual_rate=$(echo "scale=1; $count / $duration" | bc)
 
-  # Signal capture script to stop
-  echo "STOP:$service" > $SIGNAL_FILE
-  echo " Signal sent: STOP:$service"
+  echo ""
+  echo " [$end_human] $service traffic COMPLETE"
+  echo " Duration : ${duration}s"
+  echo " Avg rate : ${actual_rate} req/sec"
+  echo ""
+  echo " --> Go to node-1 and press Enter to STOP tcpdump"
+  echo " --> Then press Enter HERE to continue..."
+  read
 
   # Log timing
   echo "Service: $service" >> $LOG_FILE
-  echo "  Start:    $start_human" >> $LOG_FILE
-  echo "  End:      $end_human" >> $LOG_FILE
-  echo "  Duration: ${duration}s" >> $LOG_FILE
-  echo "  Requests: $count" >> $LOG_FILE
-  echo "  Avg rate: $(echo "scale=1; $count / $duration" | bc) req/sec" >> $LOG_FILE
+  echo "  Start      : $start_human" >> $LOG_FILE
+  echo "  End        : $end_human" >> $LOG_FILE
+  echo "  Duration   : ${duration}s" >> $LOG_FILE
+  echo "  Requests   : $count" >> $LOG_FILE
+  echo "  Actual rate: ${actual_rate} req/sec" >> $LOG_FILE
   echo "" >> $LOG_FILE
 
-  echo "  Completed : $service in ${duration}s"
-  echo "  Waiting 5 seconds before next service..."
+  echo " Waiting 5 seconds before next service..."
   sleep 5
 }
 
@@ -135,7 +134,7 @@ TOTAL_START=$(date +%s)
 echo ""
 echo "=============================================="
 echo " Starting traffic generation..."
-echo " Signalling capture_per_service.sh on node-1"
+echo " Coordinate Enter presses with node-1!"
 echo "=============================================="
 
 trigger_service "$PRODUCT_BROWSE" "product_browse" "$REQUESTS" "$SLEEP_INTERVAL"
@@ -148,20 +147,20 @@ trigger_service "$HEALTH" "health" "$REQUESTS" "$SLEEP_INTERVAL"
 TOTAL_END=$(date +%s)
 TOTAL_DURATION=$(( TOTAL_END - TOTAL_START ))
 
-# Final signal
-echo "DONE:all" > $SIGNAL_FILE
-
 echo "" >> $LOG_FILE
-echo "Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
-echo "Completed: $(date)" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
+echo " Summary" >> $LOG_FILE
+echo " Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
+echo " Completed: $(date)" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
 
 echo ""
 echo "=============================================="
 echo " All traffic generation complete!"
 echo " Total requests : $((REQUESTS * 6))"
 echo " Total time     : ${TOTAL_DURATION}s"
-echo " Log saved to   : $LOG_FILE"
+echo " Log saved      : $LOG_FILE"
 echo "=============================================="
 echo ""
-echo " View log: cat $LOG_FILE"
-echo " On node-1 run: bash capture/copy_captures.sh"
+echo " View log : cat $LOG_FILE"
+echo " On node-1: bash capture/copy_captures.sh"

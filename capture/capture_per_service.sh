@@ -2,27 +2,25 @@
 # =============================================================
 # capture_per_service.sh
 # =============================================================
-# PURPOSE : Capture traffic per service with automatic labelling
+# PURPOSE : Capture traffic per service with timing logs
 # RUN ON  : node-1 (mongo-node)
 # USAGE   : bash capture/capture_per_service.sh
-# NOTE    : Automatically coordinates with generate_traffic.sh
-#           via signal file /tmp/traffic_signal.txt on node-0
-#           No manual Enter key presses needed!
+# MANUAL  : Press Enter to start/stop each service capture
 # =============================================================
 
 CAPTURE_DIR="/tmp/captures"
 mkdir -p $CAPTURE_DIR
 
 INTERFACE="cni0"
-SIGNAL_FILE="/tmp/traffic_signal.txt"
 LOG_FILE="/tmp/capture_log.txt"
-NODE0="node-0"
 
 # Initialize log
-echo "Capture Log" > $LOG_FILE
-echo "===========" >> $LOG_FILE
-echo "Date: $(date)" >> $LOG_FILE
-echo "Interface: $INTERFACE" >> $LOG_FILE
+echo "================================================" > $LOG_FILE
+echo " Traffic Capture Log" >> $LOG_FILE
+echo " Date: $(date)" >> $LOG_FILE
+echo " Interface: $INTERFACE" >> $LOG_FILE
+echo " Node: $(hostname)" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
 echo "" >> $LOG_FILE
 
 echo "=============================================="
@@ -42,48 +40,35 @@ SERVICES=(
   "health"
 )
 
-wait_for_signal() {
-  local expected=$1
-  echo " Waiting for signal: $expected"
-  while true; do
-    # Read signal from node-0
-    SIGNAL=$(ssh -o StrictHostKeyChecking=no $NODE0 \
-      "cat $SIGNAL_FILE 2>/dev/null || echo 'NONE'" 2>/dev/null)
-    if [[ "$SIGNAL" == *"$expected"* ]]; then
-      echo " Signal received: $SIGNAL"
-      break
-    fi
-    sleep 1
-  done
-}
+TOTAL_START=$(date +%s)
 
 for service in "${SERVICES[@]}"; do
   echo ""
   echo "----------------------------------------------"
-  echo " Waiting to capture: $service"
+  echo " Next service: $service"
   echo "----------------------------------------------"
-
-  # Wait for START signal from node-0
-  wait_for_signal "START:$service"
+  echo " Go to node-0 and start traffic for: $service"
+  echo " Press Enter HERE to START tcpdump..."
+  read
 
   TIMESTAMP=$(date +%Y%m%d_%H%M%S)
   OUTFILE="$CAPTURE_DIR/${service}_${TIMESTAMP}.pcap"
   START_TIME=$(date +%s)
   START_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
 
-  echo " Starting tcpdump -> $OUTFILE"
+  echo " [$START_HUMAN] tcpdump STARTED for $service"
+  echo " File: $OUTFILE"
+
   sudo tcpdump -i $INTERFACE \
     port 27017 \
     -w $OUTFILE \
     -q &
   TCPDUMP_PID=$!
-  echo " tcpdump running (PID: $TCPDUMP_PID)"
 
-  # Wait for STOP signal from node-0
-  wait_for_signal "STOP:$service"
+  echo " tcpdump PID: $TCPDUMP_PID"
+  echo " Press Enter to STOP when traffic is complete..."
+  read
 
-  # Give tcpdump 2 more seconds to flush remaining packets
-  sleep 2
   kill $TCPDUMP_PID 2>/dev/null
   wait $TCPDUMP_PID 2>/dev/null || true
 
@@ -91,36 +76,48 @@ for service in "${SERVICES[@]}"; do
   END_HUMAN=$(date '+%Y-%m-%d %H:%M:%S')
   DURATION=$(( END_TIME - START_TIME ))
   SIZE=$(ls -lh $OUTFILE 2>/dev/null | awk '{print $5}')
-  PACKETS=$(tcpdump -r $OUTFILE 2>/dev/null | wc -l || echo "unknown")
+  PACKETS=$(sudo tcpdump -r $OUTFILE 2>/dev/null | wc -l)
 
-  echo " Capture complete!"
-  echo "   File    : $OUTFILE"
-  echo "   Size    : $SIZE"
-  echo "   Packets : $PACKETS"
-  echo "   Duration: ${DURATION}s"
+  echo ""
+  echo " [$END_HUMAN] tcpdump STOPPED for $service"
+  echo " Duration : ${DURATION}s"
+  echo " File size: $SIZE"
+  echo " Packets  : $PACKETS"
 
-  # Log details
+  # Write to log
   echo "Service: $service" >> $LOG_FILE
-  echo "  File     : $OUTFILE" >> $LOG_FILE
   echo "  Start    : $START_HUMAN" >> $LOG_FILE
   echo "  End      : $END_HUMAN" >> $LOG_FILE
-  echo "  Duration : ${DURATION}s" >> $LOG_FILE
+  echo "  Duration : ${DURATION} seconds" >> $LOG_FILE
+  echo "  File     : $OUTFILE" >> $LOG_FILE
   echo "  Size     : $SIZE" >> $LOG_FILE
   echo "  Packets  : $PACKETS" >> $LOG_FILE
   echo "" >> $LOG_FILE
 
+  echo " Waiting 3 seconds before next service..."
   sleep 3
 done
+
+TOTAL_END=$(date +%s)
+TOTAL_DURATION=$(( TOTAL_END - TOTAL_START ))
+
+echo "" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
+echo " Summary" >> $LOG_FILE
+echo " Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
+echo " Completed: $(date)" >> $LOG_FILE
+echo "================================================" >> $LOG_FILE
 
 echo ""
 echo "=============================================="
 echo " All captures complete!"
+echo " Total time: ${TOTAL_DURATION}s"
 echo "=============================================="
 echo ""
 ls -lh $CAPTURE_DIR
 echo ""
-echo " Capture log:"
+echo " Full capture log:"
+echo "-------------------"
 cat $LOG_FILE
 echo ""
 echo " Run: bash capture/copy_captures.sh"
-echo " to get commands to copy files to your laptop"

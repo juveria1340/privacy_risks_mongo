@@ -18,15 +18,19 @@ def get_client():
 def add_to_cart():
     client = get_client()
     db = client.ecommerce
-    user_id = f"user_{random.randint(0, 99)}"
+    user_id = f"user_{random.randint(0, 499)}"
     product_id = f"prod_{random.randint(0, 199)}"
     db.carts.update_one(
         {"userId": user_id},
-        {"\\": {"products": {"productId": product_id, "quantity": 1}}},
+        {"$push": {"products": {"productId": product_id, "quantity": 1}}},
         upsert=True
     )
     client.close()
-    return jsonify({"status": "ok", "operation": "add_to_cart"}), 200
+    return jsonify({
+        "status": "ok",
+        "operation": "add_to_cart",
+        "userId": user_id
+    }), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

@@ -5,33 +5,40 @@
 # PURPOSE : Generate labelled traffic for all 6 services
 # RUN ON  : node-0
 # USAGE   : bash capture/generate_traffic.sh <requests> <rate>
-# EXAMPLE : bash capture/generate_traffic.sh 1000 10
+# EXAMPLE : bash capture/generate_traffic.sh 500 10
 # NOTE    : Run capture/capture_per_service.sh on node-1 first!
-#
-# JUSTIFICATION:
-# Traffic is generated at a controlled rate using sleep intervals
-# between requests. This produces consistent inter-arrival times
-# between flows, making the dataset reproducible across runs.
-# Rate is calculated as: sleep = 1/rate seconds between requests
+# SIGNAL  : Uses /tmp/traffic_signal.txt to coordinate
+#           with capture_per_service.sh (no Enter needed)
 # =============================================================
 
 set -e
 
-REQUESTS=${1:-1000}   # default 1000 requests per service
-RATE=${2:-10}         # default 10 requests per second
+REQUESTS=${1:-500}
+RATE=${2:-10}
 NAMESPACE="dissertation"
 SLEEP_INTERVAL=$(echo "scale=3; 1/$RATE" | bc)
+SIGNAL_FILE="/tmp/traffic_signal.txt"
+LOG_FILE="/tmp/traffic_generation.log"
+
+# Initialize log
+echo "Traffic Generation Log" > $LOG_FILE
+echo "======================" >> $LOG_FILE
+echo "Date: $(date)" >> $LOG_FILE
+echo "Requests per service: $REQUESTS" >> $LOG_FILE
+echo "Rate: $RATE req/sec" >> $LOG_FILE
+echo "Sleep interval: ${SLEEP_INTERVAL}s" >> $LOG_FILE
+echo "" >> $LOG_FILE
 
 echo "=============================================="
 echo " Traffic Generation"
 echo " Requests per service : $REQUESTS"
 echo " Rate                 : $RATE req/sec"
-echo " Sleep interval       : ${SLEEP_INTERVAL}s between requests"
+echo " Sleep interval       : ${SLEEP_INTERVAL}s"
 echo " Total requests       : $((REQUESTS * 6))"
 echo " Est. time per service: $((REQUESTS / RATE)) seconds"
+echo " Log file             : $LOG_FILE"
 echo "=============================================="
 
-# Get pod names dynamically
 get_pod() {
   kubectl get pod -n $NAMESPACE -l app=$1 \
     -o jsonpath='{.items[0].metadata.name}'
@@ -53,65 +60,84 @@ echo "  checkout       : $CHECKOUT"
 echo "  order-history  : $ORDER_HISTORY"
 echo "  health         : $HEALTH"
 
-# Function to trigger a service at controlled rate
 trigger_service() {
   local pod=$1
   local service=$2
   local count=$3
   local interval=$4
-  local start_time=$(date +%s)
 
   echo ""
   echo "----------------------------------------------"
   echo " Service  : $service"
-  echo " Pod      : $pod"
   echo " Requests : $count at $RATE req/sec"
   echo " Start    : $(date '+%Y-%m-%d %H:%M:%S')"
   echo "----------------------------------------------"
-  echo " Make sure tcpdump is capturing on node-1!"
-  read -p " Press Enter to start $service..."
 
-  for i in $(seq 1 $count); do
-    kubectl exec -n $NAMESPACE $pod -- \
-      python3 -c "
+  # Signal capture script to start
+  echo "START:$service" > $SIGNAL_FILE
+  echo " Signal sent: START:$service"
+  echo " Waiting 2 seconds for tcpdump to start..."
+  sleep 2
+
+  local start_time=$(date +%s)
+  local start_human=$(date '+%Y-%m-%d %H:%M:%S')
+
+  # Run loop INSIDE pod
+  kubectl exec -n $NAMESPACE $pod -- python3 -c "
 import urllib.request
-urllib.request.urlopen('http://localhost:5000/api/v1')
-" 2>/dev/null
+import time
 
-    # Rate control
-    sleep $interval
+total = $count
+interval = $interval
 
-    # Progress update every 50 requests
-    if [ $((i % 50)) -eq 0 ]; then
-      elapsed=$(( $(date +%s) - start_time ))
-      actual_rate=$(echo "scale=1; $i / $elapsed" | bc 2>/dev/null || echo "~$RATE")
-      echo "  Progress: $i/$count requests | Elapsed: ${elapsed}s | Rate: ${actual_rate} req/sec"
-    fi
-  done
+print(f'Starting {total} requests at {1/interval:.1f} req/sec')
+start = time.time()
+
+for i in range(1, total + 1):
+    try:
+        urllib.request.urlopen('http://localhost:5000/api/v1')
+    except Exception as e:
+        print(f'Request {i} failed: {e}')
+    time.sleep(interval)
+    if i % 100 == 0:
+        elapsed = time.time() - start
+        rate = i / elapsed
+        print(f'Progress: {i}/{total} | Rate: {rate:.1f} req/sec')
+
+elapsed = time.time() - start
+print(f'Done! {total} requests in {elapsed:.1f}s ({total/elapsed:.1f} req/sec)')
+"
 
   local end_time=$(date +%s)
   local duration=$(( end_time - start_time ))
-  local actual_rate=$(echo "scale=1; $count / $duration" | bc 2>/dev/null || echo "~$RATE")
+  local end_human=$(date '+%Y-%m-%d %H:%M:%S')
 
-  echo ""
-  echo "  Completed: $service"
-  echo "  Duration : ${duration}s"
-  echo "  Avg rate : ${actual_rate} req/sec"
-  echo "  Press Enter when tcpdump capture is stopped for $service..."
-  read
+  # Signal capture script to stop
+  echo "STOP:$service" > $SIGNAL_FILE
+  echo " Signal sent: STOP:$service"
 
-  # Pause between services for clean separation
+  # Log timing
+  echo "Service: $service" >> $LOG_FILE
+  echo "  Start:    $start_human" >> $LOG_FILE
+  echo "  End:      $end_human" >> $LOG_FILE
+  echo "  Duration: ${duration}s" >> $LOG_FILE
+  echo "  Requests: $count" >> $LOG_FILE
+  echo "  Avg rate: $(echo "scale=1; $count / $duration" | bc) req/sec" >> $LOG_FILE
+  echo "" >> $LOG_FILE
+
+  echo "  Completed : $service in ${duration}s"
   echo "  Waiting 5 seconds before next service..."
   sleep 5
 }
 
+TOTAL_START=$(date +%s)
+
 echo ""
 echo "=============================================="
 echo " Starting traffic generation..."
-echo " Coordinate with node-1 capture script!"
+echo " Signalling capture_per_service.sh on node-1"
 echo "=============================================="
 
-# Generate traffic for each service
 trigger_service "$PRODUCT_BROWSE" "product_browse" "$REQUESTS" "$SLEEP_INTERVAL"
 trigger_service "$SEARCH" "search" "$REQUESTS" "$SLEEP_INTERVAL"
 trigger_service "$ADD_TO_CART" "add_to_cart" "$REQUESTS" "$SLEEP_INTERVAL"
@@ -119,11 +145,23 @@ trigger_service "$CHECKOUT" "checkout" "$REQUESTS" "$SLEEP_INTERVAL"
 trigger_service "$ORDER_HISTORY" "order_history" "$REQUESTS" "$SLEEP_INTERVAL"
 trigger_service "$HEALTH" "health" "$REQUESTS" "$SLEEP_INTERVAL"
 
+TOTAL_END=$(date +%s)
+TOTAL_DURATION=$(( TOTAL_END - TOTAL_START ))
+
+# Final signal
+echo "DONE:all" > $SIGNAL_FILE
+
+echo "" >> $LOG_FILE
+echo "Total Duration: ${TOTAL_DURATION}s" >> $LOG_FILE
+echo "Completed: $(date)" >> $LOG_FILE
+
 echo ""
 echo "=============================================="
 echo " All traffic generation complete!"
-echo " Total requests sent: $((REQUESTS * 6))"
-echo " Services captured  : 6"
+echo " Total requests : $((REQUESTS * 6))"
+echo " Total time     : ${TOTAL_DURATION}s"
+echo " Log saved to   : $LOG_FILE"
 echo "=============================================="
 echo ""
-
+echo " View log: cat $LOG_FILE"
+echo " On node-1 run: bash capture/copy_captures.sh"

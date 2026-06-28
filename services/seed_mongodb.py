@@ -57,7 +57,7 @@ print("Loading Amazon Sales Dataset...")
 products = []
 categories = set()
 
-with open("/data/amazon.csv", encoding="utf-8") as f:
+with open("/tmp/amazon.csv", encoding="utf-8") as f:
     reader = csv.DictReader(f)
     for row in reader:
         try:
@@ -168,3 +168,4 @@ print(f"Users    : {db.users.count_documents({})}")
 print(f"Carts    : {db.carts.count_documents({})}")
 print(f"Orders   : {db.orders.count_documents({})}")
 client.close()
+

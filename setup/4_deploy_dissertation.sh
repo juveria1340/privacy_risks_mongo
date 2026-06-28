@@ -62,23 +62,37 @@ echo "    MongoDB ready!"
 echo ""
 echo "--> [5/8] Seeding MongoDB with Amazon Sales Dataset..."
 
-# Create seed-data ConfigMap from pre-cleaned CSV
-kubectl create configmap seed-data \
-  --from-file=amazon.csv=$REPO_DIR/data/seed/amazon_clean.csv \
-  --namespace $NAMESPACE \
-  --dry-run=client -o yaml | kubectl apply -f -
-echo "    seed-data ConfigMap created"
-
-# Run seed job
-kubectl delete job mongodb-seed -n $NAMESPACE --ignore-not-found=true
+# Create seed script ConfigMap
 kubectl apply -f $REPO_DIR/kubernetes/mongodb/seed-configmap.yaml
-kubectl apply -f $REPO_DIR/kubernetes/mongodb/seed-job.yaml
-echo "    Waiting for seed job to complete..."
-kubectl wait --for=condition=complete job/mongodb-seed \
-  -n $NAMESPACE --timeout=600s
-kubectl logs -n $NAMESPACE \
-  $(kubectl get pod -n $NAMESPACE -l job-name=mongodb-seed \
-    -o jsonpath='{.items[0].metadata.name}') | tail -10
+
+# Run a Python seeder pod
+kubectl delete pod amazon-seeder -n $NAMESPACE --ignore-not-found=true
+kubectl run amazon-seeder \
+  --image=python:3.11-slim \
+  --restart=Never \
+  --namespace=$NAMESPACE \
+  --overrides="{\"spec\":{\"containers\":[{\"name\":\"amazon-seeder\",\"image\":\"python:3.11-slim\",\"command\":[\"sleep\",\"3600\"],\"volumeMounts\":[{\"name\":\"tls\",\"mountPath\":\"/etc/tls\",\"readOnly\":true}]}],\"volumes\":[{\"name\":\"tls\",\"secret\":{\"secretName\":\"mongodb-tls\"}}]}}"
+
+echo "    Waiting for seeder pod to start..."
+kubectl wait --for=condition=ready pod/amazon-seeder \
+  -n $NAMESPACE --timeout=60s
+
+echo "    Installing pymongo..."
+kubectl exec -n $NAMESPACE amazon-seeder -- \
+  pip install pymongo --quiet
+
+echo "    Copying files to seeder pod..."
+kubectl cp $REPO_DIR/data/seed/amazon_clean.csv \
+  $NAMESPACE/amazon-seeder:/tmp/amazon.csv
+kubectl cp $REPO_DIR/services/seed_mongodb.py \
+  $NAMESPACE/amazon-seeder:/tmp/seed_mongodb.py
+
+echo "    Running seed script..."
+kubectl exec -n $NAMESPACE amazon-seeder -- \
+  python3 /tmp/seed_mongodb.py
+
+echo "    Cleaning up seeder pod..."
+kubectl delete pod amazon-seeder -n $NAMESPACE --ignore-not-found=true
 echo "    MongoDB seeded!"
 
 # 6. Create ConfigMaps
@@ -115,6 +129,7 @@ echo "=============================================="
 echo ""
 echo " Next: SSH into node-3 then run:"
 echo "   bash capture/capture_traffic.sh"
+
 
 
 

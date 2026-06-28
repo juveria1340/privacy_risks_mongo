@@ -55,9 +55,9 @@ print("Cleared existing collections")
 # Load Amazon Sales Dataset
 print("Loading Amazon Sales Dataset...")
 try:
-    df = pd.read_csv("/data/amazon.csv", encoding="utf-8")
+    df = pd.read_csv("/tmp/amazon.csv", encoding="utf-8")
 except:
-    df = pd.read_csv("/data/amazon.csv", encoding="latin-1")
+    df = pd.read_csv("/tmp/amazon.csv", encoding="latin-1")
 
 print(f"Loaded {len(df)} rows from amazon.csv")
 print(f"Columns: {list(df.columns)}")
@@ -175,3 +175,4 @@ print(f"Users    : {db.users.count_documents({})}")
 print(f"Carts    : {db.carts.count_documents({})}")
 print(f"Orders   : {db.orders.count_documents({})}")
 client.close()
+

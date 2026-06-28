@@ -58,36 +58,60 @@ kubectl wait --for=condition=ready pod \
   -l app=mongodb -n $NAMESPACE --timeout=180s
 echo "    MongoDB ready!"
 
-# 5a. Create seed data ConfigMap from CSV
+# 5a. Download and clean Amazon CSV on node
 echo ""
-echo "--> [5a/8] Creating seed data ConfigMap from CSV..."
-kubectl create configmap seed-data \
-  --from-file=amazon.csv=$REPO_DIR/data/seed/amazon.csv \
-  --namespace $NAMESPACE \
-  --dry-run=client -o yaml | kubectl apply -f -
-echo "    Done."
+echo "
 
-# 5a. Create seed data ConfigMap from CSV
+# 5a. Download and clean Amazon CSV on node
 echo ""
-echo "--> [5a/8] Creating seed data ConfigMap from CSV..."
-kubectl create configmap seed-data \
-  --from-file=amazon.csv=$REPO_DIR/data/seed/amazon.csv \
-  --namespace $NAMESPACE \
-  --dry-run=client -o yaml | kubectl apply -f -
-echo "    Done."
+echo "
 
 # 5. Seed MongoDB
 echo ""
-echo "--> [5/8] Seeding MongoDB with e-commerce data..."
-kubectl apply -f $REPO_DIR/kubernetes/mongodb/seed-configmap.yaml
-kubectl delete job mongodb-seed -n $NAMESPACE --ignore-not-found=true
-kubectl apply -f $REPO_DIR/kubernetes/mongodb/seed-job.yaml
-echo "    Waiting for seed job..."
-kubectl wait --for=condition=complete job/mongodb-seed \
-  -n $NAMESPACE --timeout=600s
-kubectl logs -n $NAMESPACE \
-  $(kubectl get pod -n $NAMESPACE -l job-name=mongodb-seed \
-    -o jsonpath='{.items[0].metadata.name}') | tail -8
+echo "--> [5/8] Seeding MongoDB with Amazon dataset..."
+
+MONGO_POD=$(kubectl get pod -n $NAMESPACE -l app=mongodb \
+  -o jsonpath='{.items[0].metadata.name}')
+echo "    MongoDB pod: $MONGO_POD"
+
+# Install pip packages in MongoDB pod
+echo "    Installing pymongo and pandas..."
+kubectl exec -n $NAMESPACE $MONGO_POD -- \
+  bash -c "apt-get update -q && apt-get install -y -q python3-pip && \
+  pip3 install pymongo pandas --quiet" 2>/dev/null
+
+# Copy CSV into MongoDB pod
+if [ -f "$REPO_DIR/data/seed/amazon.csv" ]; then
+  echo "    Copying Amazon CSV to pod..."
+  # Clean CSV first
+  python3 -c "
+import pandas as pd, re
+try:
+    df = pd.read_csv('$REPO_DIR/data/seed/amazon.csv', encoding='utf-8')
+except:
+    df = pd.read_csv('$REPO_DIR/data/seed/amazon.csv', encoding='latin-1')
+for col in df.columns:
+    if df[col].dtype == object:
+        df[col] = df[col].astype(str).apply(lambda x: re.sub(r'[\x00-\x1f\x7f]', ' ', x))
+df.to_csv('/tmp/amazon_clean.csv', index=False, encoding='utf-8')
+print(f'Cleaned: {len(df)} rows')
+"
+  kubectl cp /tmp/amazon_clean.csv \
+    $NAMESPACE/$MONGO_POD:/tmp/amazon.csv
+  echo "    CSV copied!"
+else
+  echo "    No CSV found - using synthetic data only"
+fi
+
+# Copy seed script into pod
+kubectl cp $REPO_DIR/services/seed_mongodb.py \
+  $NAMESPACE/$MONGO_POD:/tmp/seed_mongodb.py
+
+# Run seed script directly in MongoDB pod
+echo "    Running seed script..."
+kubectl exec -n $NAMESPACE $MONGO_POD -- \
+  python3 /tmp/seed_mongodb.py
+
 echo "    MongoDB seeded!"
 
 # 6. Create ConfigMaps
@@ -124,6 +148,9 @@ echo "=============================================="
 echo ""
 echo " Next: SSH into node-3 then run:"
 echo "   bash capture/capture_traffic.sh"
+
+
+
 
 
 

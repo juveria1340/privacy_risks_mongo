@@ -23,12 +23,12 @@ echo "=============================================="
 echo ""
 echo "--> [1/8] Labelling nodes..."
 # Get node names sorted alphabetically
-CONTROL=$(kubectl get nodes --no-headers | grep "control-plane" | awk '{print $1}')
-WORKERS=($(kubectl get nodes --no-headers | grep -v "control-plane" | awk '{print $1}' | sort))
-kubectl label node $CONTROL role=control-plane --overwrite
-kubectl label node ${WORKERS[0]} role=mongo-node --overwrite
-kubectl label node ${WORKERS[1]} role=app-node --overwrite
-kubectl label node ${WORKERS[2]} role=capture-node --overwrite
+ALL_NODES=($(kubectl get nodes --no-headers | awk '{print $1}' | sort))
+echo "    Found nodes: ${ALL_NODES[@]}"
+kubectl label node ${ALL_NODES[0]} role=control-plane --overwrite
+kubectl label node ${ALL_NODES[1]} role=mongo-node --overwrite
+kubectl label node ${ALL_NODES[2]} role=app-node --overwrite
+kubectl label node ${ALL_NODES[3]} role=capture-node --overwrite
 kubectl get nodes -L role
 echo "    Done."
 
@@ -129,6 +129,9 @@ echo "=============================================="
 echo ""
 echo " Next: SSH into node-3 then run:"
 echo "   bash capture/capture_traffic.sh"
+
+
+
 
 
 

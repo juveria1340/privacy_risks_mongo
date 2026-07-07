@@ -15,7 +15,7 @@ RATE=${2:-10}
 CAPTURE_DIR="/tmp/captures"
 mkdir -p $CAPTURE_DIR
 
-INTERFACE="cni0"
+INTERFACE="vxlan.calico"
 LOG_FILE="/tmp/capture_log.txt"
 
 # Match duration with generate_traffic.sh
@@ -117,3 +117,4 @@ echo "Full capture log:"
 cat $LOG_FILE
 echo ""
 echo "Run: bash capture/copy_captures.sh"
+
